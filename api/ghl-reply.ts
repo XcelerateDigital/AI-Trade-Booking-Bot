@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { findConversationId, getContact, getTranscript, sendSms, addTags, addNote } from "../lib/ghl";
-import { generateReply, type Ctx } from "../lib/ai";
+import { findConversationId, getContact, getTranscript, sendSms, addTags, addNote } from "../lib/ghl.js";
+import { generateReply, type Ctx } from "../lib/ai.js";
 
 export const config = { maxDuration: 60 };
 

@@ -1,6 +1,6 @@
-import { buildSystemPrompt } from "./prompt";
-import type { ChatMessage } from "./ghl";
-import * as ghl from "./ghl";
+import { buildSystemPrompt } from "./prompt.js";
+import type { ChatMessage } from "./ghl.js";
+import * as ghl from "./ghl.js";
 
 type Block = { type: string; [k: string]: any };
 type Msg = { role: "user" | "assistant"; content: string | Block[] };
