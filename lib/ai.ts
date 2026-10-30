@@ -35,6 +35,37 @@ export function toClaudeMessages(transcript: ChatMessage[]): Msg[] {
   return out;
 }
 
+const MAX_IMAGE_BYTES = 4_500_000; // Claude's limit is 5MB per image
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+/**
+ * Claude can't fetch many photo hosts itself (robots.txt blocks, auth, etc.), so download
+ * each photo here and send it inline as base64. If one can't be loaded, say so in text
+ * rather than failing the whole reply.
+ */
+export async function inlineImages(messages: Msg[]): Promise<Msg[]> {
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue;
+    m.content = await Promise.all(
+      m.content.map(async (b): Promise<Block> => {
+        if (b.type !== "image" || b.source?.type !== "url") return b;
+        const note: Block = { type: "text", text: "[The lead sent a photo that could not be loaded. Ask them to describe it.]" };
+        try {
+          const r = await fetch(b.source.url);
+          if (!r.ok) return note;
+          const type = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+          const buf = Buffer.from(await r.arrayBuffer());
+          if (!IMAGE_TYPES.includes(type) || buf.length > MAX_IMAGE_BYTES) return note;
+          return { type: "image", source: { type: "base64", media_type: type, data: buf.toString("base64") } };
+        } catch {
+          return note;
+        }
+      }),
+    );
+  }
+  return messages;
+}
+
 const tools = (canBook: boolean) => [
   {
     name: "save_job_details",
@@ -149,7 +180,7 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
     canBook,
     nowLocal: new Date().toLocaleString("en-AU", { timeZone: TZ(), dateStyle: "full", timeStyle: "short" }),
   });
-  const messages: Msg[] = toClaudeMessages(transcript);
+  const messages: Msg[] = await inlineImages(toClaudeMessages(transcript));
 
   for (let i = 0; i < 6; i++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
