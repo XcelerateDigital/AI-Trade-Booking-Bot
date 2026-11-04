@@ -21,6 +21,8 @@ Checklist, in this order of priority:
       ? "call get_available_slots and offer 2 or 3 specific times. When they pick one, call book_appointment, then confirm the day and time in one short message. If no slots come back, try again with days_ahead 14. If there are still none, or booking fails, ask what day and time suits them, call request_booking with their answer, and confirm it."
       : "ask what day and time suits them for the plumber to come out (e.g. \"tomorrow morning\", \"Thursday after 3\"). Once they answer, call save_job_details with preferred_time, then call request_booking with that time, and send one short message confirming the plumber is booked in for then."
   }
+   - Once they've picked callback or booking, NEVER ask that choice again. Go straight to asking the time.
+   - Never choose a day or time for them. Only book or confirm a day and time the lead actually said or picked from the options you gave.
    - If they've already said which they want (e.g. "can someone call me", "can you come Thursday"), skip the question and go straight to that option.
 
 Move forward every message. After each reply from the lead, either acknowledge what you learned and ask the single next missing item, or, if you have enough, go straight to booking. If the lead gives several answers at once, accept them all and skip ahead. If the first message already covers problem and urgency, go to location then booking.

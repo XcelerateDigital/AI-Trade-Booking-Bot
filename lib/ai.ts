@@ -211,8 +211,9 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
   // Claude often writes the SMS in the same turn as a tool call, then says nothing after the
   // tool result. Keep every bit of text so the reply is never silently dropped.
   const said: string[] = [];
+  let nudges = 0;
 
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -237,11 +238,27 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
     if (data.stop_reason !== "tool_use") {
       if (text) return text;
       if (said.length) return said[said.length - 1];
-      // Never leave the lead hanging with no reply.
+      // Claude occasionally returns a blank reply. Ask it again (up to twice) with a nudge,
+      // rather than sending a canned message that may repeat something already asked.
+      console.warn("empty reply from Claude", { stop_reason: data.stop_reason, nudges, outcome: ctx.outcome });
+      if (nudges < 2) {
+        nudges++;
+        const nudge: Block = {
+          type: "text",
+          text: "[Your last response was empty. Write the SMS reply to the lead now. Re-read the whole conversation, use every answer they've already given, and do not repeat a question they've already answered.]",
+        };
+        const last = messages[messages.length - 1];
+        if (last.role === "user") (last.content as Block[]).push(nudge);
+        else messages.push({ role: "user", content: [nudge] });
+        continue;
+      }
+      // Last resort: never leave the lead hanging with no reply.
       if (ctx.outcome === "booked" || ctx.outcome === "requested") return "You're all booked in. The plumber will see you then.";
       if (ctx.outcome === "callback") return "All sorted, the plumber will give you a call then.";
       if (ctx.outcome === "opted_out") return "No worries, you won't get any more messages from us.";
-      return "Thanks for that. Would you like the plumber to give you a call, or shall I book a time for them to come out?";
+      const lastSent = [...transcript].reverse().find((m) => m.direction === "outbound")?.body;
+      const ask = "Thanks for that. Would you like the plumber to give you a call, or shall I book a time for them to come out?";
+      return lastSent === ask ? "Sorry about that. What day and time suits you best?" : ask;
     }
 
     messages.push({ role: "assistant", content: data.content });
