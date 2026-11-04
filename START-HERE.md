@@ -1,6 +1,6 @@
 # START HERE: Set up your AI lead-reply bot
 
-**What it does:** when a lead replies to your first text in GoHighLevel (GHL), an AI (Claude) reads the conversation, works out the problem, asks for photos, asks how urgent it is and the suburb, asks what day/time suits for a call, then tells the lead your team will ring them. A summary lands in the contact's notes in GHL and the contact gets the tag `ai-handoff`.
+**What it does:** when a lead replies to your first text in GoHighLevel (GHL), an AI (Claude) reads the conversation, works out the problem, asks for photos, how urgent it is and the suburb, then asks whether they'd like a callback from the plumber or a booked visit, and locks in whichever they pick. Every conversation ends in a callback time (tag `ai-callback`) or a booking. With a calendar connected (`GHL_CALENDAR_ID`) it offers real free slots and books them; without one it records the lead's requested time as a note and tags the contact `ai-booking-requested`.
 
 **You do NOT need to code.** Set aside about 30 minutes. You need 3 accounts: GitHub (you're here), Anthropic, and Vercel (free), plus your GHL login.
 
@@ -73,7 +73,7 @@ Invent a long random password, e.g. `kj83hd-92ndPq-77xLmz-4421`. No spaces. Save
 1. Add a test contact in GHL with **your own mobile number**, and put it in your new-lead pipeline stage so your first text goes out.
 2. Reply from your phone: *"my kitchen tap is leaking"*.
 3. Within about 10 seconds you should get a text back asking a follow-up question. Keep replying like a customer would (send a photo, say "Thursday arvo", give a suburb).
-4. At the end, open the contact in GHL: you should see a **note** with the job summary and the tag **ai-handoff**. That's your team's cue to ring them.
+4. At the end, open the contact in GHL: you should see a **note** with the job summary, plus one of: a calendar appointment and tag **ai-booked**, a booking-request note and tag **ai-booking-requested**, or a callback note and tag **ai-callback**.
 
 **Nothing happens?** In Vercel open your project > **Logs** and read the red line. Most likely causes:
 - `unauthorized`: the password in the bot address doesn't match `WEBHOOK_SECRET`.
@@ -85,8 +85,8 @@ Invent a long random password, e.g. `kj83hd-92ndPq-77xLmz-4421`. No spaces. Save
 ## Day to day
 
 - **Take over a chat yourself:** add the tag `ai-stop` to the contact. The bot goes silent for them.
-- **Contacts the bot finished with** get `ai-handoff`. Set up a GHL notification on that tag so someone calls quickly.
-- **Emergencies** (gas, sparks, flooding): the bot tells the lead to call 000 and tags the contact `ai-handoff`.
+- **Booked contacts** get `ai-booked` (or `ai-booking-requested` with no calendar); **callback requests** get `ai-callback`. Set up GHL notifications on those tags (especially `ai-callback`, so the plumber rings on time) so the tradie sees new jobs. The bot keeps answering if they text again (e.g. to change the time).
+- **Emergencies** (gas, sparks, flooding): the bot gives safety advice (mains off, 000 if anyone is in danger) and offers an immediate callback or the soonest booking. The only thing that stops the bot is the lead texting STOP (tags `ai-stop`) or you adding `ai-stop` yourself.
 - The bot never quotes prices, and if asked it says it's a virtual assistant.
 - It stops by itself after 20 messages with one lead.
 

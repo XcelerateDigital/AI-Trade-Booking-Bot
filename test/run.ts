@@ -83,10 +83,10 @@ assert.match(sent[0].message, /photo/);
 assert.equal(sent[0].contactId, "c1");
 assert.ok(calls.some((c) => c.startsWith("POST /contacts/c1/notes")), "job summary saved as note");
 
-// a contact already tagged ai-handoff must get no reply
-contactTags = ["ai-handoff"];
+// a contact tagged ai-stop (opted out / human took over) must get no reply
+contactTags = ["ai-stop"];
 const r2 = await call({ "x-webhook-secret": "s3cret" }, { contact_id: "c1", location: { id: "loc1" } });
-assert.equal(r2.payload.skipped, "human-or-finished tag");
+assert.equal(r2.payload.skipped, "stop tag");
 assert.equal(sent.length, 1);
 
 console.log("all tests passed");

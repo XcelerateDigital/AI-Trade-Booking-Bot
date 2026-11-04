@@ -9,8 +9,8 @@ export interface Ctx {
   contactId: string;
   locationId: string;
   firstName?: string;
-  /** Set to true once the bot has handed off or booked, so the endpoint can tag the contact. */
-  outcome?: "booked" | "handoff";
+  /** Set once the bot books, records a requested time, or the lead opts out, so the endpoint can tag the contact. */
+  outcome?: "booked" | "requested" | "callback" | "opted_out";
 }
 
 const TZ = () => process.env.TIMEZONE || "Australia/Sydney";
@@ -105,16 +105,33 @@ const tools = (canBook: boolean) => [
       ]
     : []),
   {
-    name: "handoff_to_human",
-    description: "Flag the lead for a human to take over (emergency, angry, wants a person, out of scope, or booking not possible).",
+    name: "request_booking",
+    description: "Lock in the visit at the day/time the lead asked for, when it can't be booked straight into the calendar. Records it in GHL for the team.",
     input_schema: {
       type: "object",
       properties: {
-        reason: { type: "string" },
-        urgency: { type: "string", enum: ["emergency", "normal"] },
+        requested_time: { type: "string", description: "The day and time the lead wants, in their words plus your best exact reading (e.g. 'Thu 6 Nov, after 3pm')" },
+        summary: { type: "string", description: "Job summary for the tradie, including suburb and urgency" },
       },
-      required: ["reason"],
+      required: ["requested_time", "summary"],
     },
+  },
+  {
+    name: "request_callback",
+    description: "The lead chose a phone call from the plumber instead of booking a visit. Records the callback time in GHL for the team.",
+    input_schema: {
+      type: "object",
+      properties: {
+        callback_time: { type: "string", description: "When to call, in their words plus your best exact reading (e.g. 'ASAP', 'Thu 6 Nov after 3pm')" },
+        summary: { type: "string", description: "Job summary for the plumber, including suburb and urgency" },
+      },
+      required: ["callback_time", "summary"],
+    },
+  },
+  {
+    name: "opt_out",
+    description: "ONLY when the lead says STOP/unsubscribe or asks not to be messaged. Stops all further messages to them.",
+    input_schema: { type: "object", properties: {} },
   },
 ];
 
@@ -140,7 +157,7 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
       case "get_available_slots": {
         const cal = process.env.GHL_CALENDAR_ID!;
         const slots = await ghl.getFreeSlots(cal, Math.min(input.days_ahead || 7, 14), TZ());
-        if (!slots.length) return "No slots available in that window. Offer to have the team call, and use handoff_to_human.";
+        if (!slots.length) return "No slots available in that window. Try days_ahead 14; if still none, ask the lead what day and time suits and use request_booking.";
         const pretty = slots.map((s) => ({
           iso: s,
           human: new Date(s).toLocaleString("en-AU", { timeZone: TZ(), weekday: "long", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }),
@@ -159,17 +176,27 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
         ctx.outcome = "booked";
         return "Booked successfully. Confirm the day and time to the lead in one short message.";
       }
-      case "handoff_to_human": {
-        await ghl.addNote(ctx.contactId, `AI handoff (${input.urgency || "normal"}): ${input.reason}`);
-        ctx.outcome = "handoff";
-        return "Flagged for the team. Send the lead a short, reassuring message about what happens next.";
+      case "request_booking": {
+        await ghl.addNote(ctx.contactId, `AI BOOKING - visit requested for: ${input.requested_time}\n${input.summary}`);
+        ctx.outcome = "requested";
+        return "Recorded. Confirm to the lead in one short message that the plumber is booked in for that time.";
+      }
+      case "request_callback": {
+        await ghl.addNote(ctx.contactId, `AI CALLBACK - call the lead: ${input.callback_time}\n${input.summary}`);
+        ctx.outcome = "callback";
+        return "Recorded. Confirm to the lead in one short message that the plumber will call them at that time.";
+      }
+      case "opt_out": {
+        await ghl.addTags(ctx.contactId, ["ai-stop"]);
+        ctx.outcome = "opted_out";
+        return "Opted out. Reply with one short confirmation and nothing else.";
       }
       default:
         return `Unknown tool ${name}`;
     }
   } catch (e: any) {
     console.error(`tool ${name} failed`, e);
-    return `Tool error: ${e.message}. Do not retry more than once; if it keeps failing, use handoff_to_human.`;
+    return `Tool error: ${e.message}. Do not retry more than once; if it keeps failing, ask the lead what day and time suits and use request_booking.`;
   }
 }
 
@@ -181,6 +208,9 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
     nowLocal: new Date().toLocaleString("en-AU", { timeZone: TZ(), dateStyle: "full", timeStyle: "short" }),
   });
   const messages: Msg[] = await inlineImages(toClaudeMessages(transcript));
+  // Claude often writes the SMS in the same turn as a tool call, then says nothing after the
+  // tool result. Keep every bit of text so the reply is never silently dropped.
+  const said: string[] = [];
 
   for (let i = 0; i < 6; i++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -202,7 +232,17 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
     const data: any = await res.json();
     const text = (data.content as Block[]).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
 
-    if (data.stop_reason !== "tool_use") return text;
+    if (text) said.push(text);
+
+    if (data.stop_reason !== "tool_use") {
+      if (text) return text;
+      if (said.length) return said[said.length - 1];
+      // Never leave the lead hanging with no reply.
+      if (ctx.outcome === "booked" || ctx.outcome === "requested") return "You're all booked in. The plumber will see you then.";
+      if (ctx.outcome === "callback") return "All sorted, the plumber will give you a call then.";
+      if (ctx.outcome === "opted_out") return "No worries, you won't get any more messages from us.";
+      return "Thanks for that. Would you like the plumber to give you a call, or shall I book a time for them to come out?";
+    }
 
     messages.push({ role: "assistant", content: data.content });
     const results: Block[] = [];
