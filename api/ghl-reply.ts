@@ -63,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Don't go silent: log it, and nudge the lead so the next reply retries the booking.
     try {
       await addNote(contactId, `AI error (bot will retry on next message): ${e.message}`);
-      await sendSms(contactId, "Sorry, small hiccup on our end. Would you like the tradie to give you a call, or shall I book a time for them to come out?");
+      await sendSms(contactId, "Sorry, small hiccup on our end. Would you like someone from the team to give you a call, or shall I book a time for them to come out?");
     } catch {}
     return res.status(500).json({ error: "failed" });
   }

@@ -97,7 +97,7 @@ const tools = (canBook: boolean) => [
             type: "object",
             properties: {
               start_time: { type: "string" },
-              summary: { type: "string", description: "Job summary for the tradie" },
+              summary: { type: "string", description: "Job summary for the team" },
             },
             required: ["start_time", "summary"],
           },
@@ -111,19 +111,19 @@ const tools = (canBook: boolean) => [
       type: "object",
       properties: {
         requested_time: { type: "string", description: "The day and time the lead wants, in their words plus your best exact reading (e.g. 'Thu 6 Nov, after 3pm')" },
-        summary: { type: "string", description: "Job summary for the tradie, including suburb and urgency" },
+        summary: { type: "string", description: "Job summary for the team, including suburb and urgency" },
       },
       required: ["requested_time", "summary"],
     },
   },
   {
     name: "request_callback",
-    description: "The lead chose a phone call from the tradie instead of booking a visit. Records the callback time in GHL for the team.",
+    description: "The lead chose a phone call from the team instead of booking a visit. Records the callback time in GHL for the team.",
     input_schema: {
       type: "object",
       properties: {
         callback_time: { type: "string", description: "When to call, in their words plus your best exact reading (e.g. 'ASAP', 'Thu 6 Nov after 3pm')" },
-        summary: { type: "string", description: "Job summary for the tradie, including suburb and urgency" },
+        summary: { type: "string", description: "Job summary for the team, including suburb and urgency" },
       },
       required: ["callback_time", "summary"],
     },
@@ -179,12 +179,12 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
       case "request_booking": {
         await ghl.addNote(ctx.contactId, `AI BOOKING - visit requested for: ${input.requested_time}\n${input.summary}`);
         ctx.outcome = "requested";
-        return "Recorded. Confirm to the lead in one short message that the tradie is booked in for that time.";
+        return "Recorded. Confirm to the lead in one short message that they're booked in and someone from the team will come out at that time.";
       }
       case "request_callback": {
         await ghl.addNote(ctx.contactId, `AI CALLBACK - call the lead: ${input.callback_time}\n${input.summary}`);
         ctx.outcome = "callback";
-        return "Recorded. Confirm to the lead in one short message that the tradie will call them at that time.";
+        return "Recorded. Confirm to the lead in one short message that someone from the team will call them at that time.";
       }
       case "opt_out": {
         await ghl.addTags(ctx.contactId, ["ai-stop"]);
@@ -253,11 +253,11 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
         continue;
       }
       // Last resort: never leave the lead hanging with no reply.
-      if (ctx.outcome === "booked" || ctx.outcome === "requested") return "You're all booked in. The tradie will see you then.";
-      if (ctx.outcome === "callback") return "All sorted, the tradie will give you a call then.";
+      if (ctx.outcome === "booked" || ctx.outcome === "requested") return "You're all booked in. Someone from the team will see you then.";
+      if (ctx.outcome === "callback") return "All sorted, someone from the team will give you a call then.";
       if (ctx.outcome === "opted_out") return "No worries, you won't get any more messages from us.";
       const lastSent = [...transcript].reverse().find((m) => m.direction === "outbound")?.body;
-      const ask = "Thanks for that. Would you like the tradie to give you a call, or shall I book a time for them to come out?";
+      const ask = "Thanks for that. Would you like someone from the team to give you a call, or shall I book a time for them to come out?";
       return lastSent === ask ? "Sorry about that. What day and time suits you best?" : ask;
     }
 
