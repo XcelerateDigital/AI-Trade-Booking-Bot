@@ -184,7 +184,7 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
       case "request_callback": {
         await ghl.addNote(ctx.contactId, `AI CALLBACK - call the lead: ${input.callback_time}\n${input.summary}`);
         ctx.outcome = "callback";
-        return "Recorded. Confirm to the lead in one short message that someone from the team will call them at that time.";
+        return "Recorded. Now reply to the lead with one short, casual confirmation, e.g. \"Yep, no worries! We'll get someone from the team to give you a buzz in about 30 mins.\" (use their time, or \"soon\" if they didn't give one).";
       }
       case "opt_out": {
         await ghl.addTags(ctx.contactId, ["ai-stop"]);
@@ -211,7 +211,12 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
   // Claude often writes the SMS in the same turn as a tool call, then says nothing after the
   // tool result. Keep every bit of text so the reply is never silently dropped.
   const said: string[] = [];
-  let nudges = 0;
+  // Claude occasionally returns a blank reply. When that happens we retry with a stronger
+  // instruction in the SYSTEM prompt (adding text after tool results makes blanks more likely),
+  // and on the final retry we turn tools off so it has to write the SMS.
+  let retries = 0;
+  const RETRY_NOTE =
+    "\n\nIMPORTANT: your previous attempt produced no SMS text. Your reply MUST contain the SMS to send to the lead. Use any tools you still need, then write the message. Use every answer they've already given and don't repeat a question.";
 
   for (let i = 0; i < 8; i++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -224,8 +229,9 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
       body: JSON.stringify({
         model: process.env.AI_MODEL || "claude-sonnet-5-5",
         max_tokens: 500,
-        system,
+        system: retries ? system + RETRY_NOTE : system,
         tools: tools(canBook),
+        ...(retries >= 2 ? { tool_choice: { type: "none" } } : {}),
         messages,
       }),
     });
@@ -238,27 +244,19 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
     if (data.stop_reason !== "tool_use") {
       if (text) return text;
       if (said.length) return said[said.length - 1];
-      // Claude occasionally returns a blank reply. Ask it again (up to twice) with a nudge,
-      // rather than sending a canned message that may repeat something already asked.
-      console.warn("empty reply from Claude", { stop_reason: data.stop_reason, nudges, outcome: ctx.outcome });
-      if (nudges < 2) {
-        nudges++;
-        const nudge: Block = {
-          type: "text",
-          text: "[Your last response was empty. Write the SMS reply to the lead now. Re-read the whole conversation, use every answer they've already given, and do not repeat a question they've already answered.]",
-        };
-        const last = messages[messages.length - 1];
-        if (last.role === "user") (last.content as Block[]).push(nudge);
-        else messages.push({ role: "user", content: [nudge] });
+      console.warn("empty reply from Claude", { stop_reason: data.stop_reason, retries, outcome: ctx.outcome });
+      if (retries < 2) {
+        retries++;
         continue;
       }
-      // Last resort: never leave the lead hanging with no reply.
+      // Last resort: never leave the lead hanging, and never ask a question that may already
+      // have been answered. Make sure a human follows up by recording a callback.
       if (ctx.outcome === "booked" || ctx.outcome === "requested") return "You're all booked in. Someone from the team will see you then.";
-      if (ctx.outcome === "callback") return "All sorted, someone from the team will give you a call then.";
       if (ctx.outcome === "opted_out") return "No worries, you won't get any more messages from us.";
-      const lastSent = [...transcript].reverse().find((m) => m.direction === "outbound")?.body;
-      const ask = "Thanks for that. Would you like someone from the team to give you a call, or shall I book a time for them to come out?";
-      return lastSent === ask ? "Sorry about that. What day and time suits you best?" : ask;
+      if (ctx.outcome !== "callback") {
+        await runTool("request_callback", { callback_time: "ASAP (bot could not reply - check the conversation)", summary: "See conversation in GHL." }, ctx);
+      }
+      return "No worries, we'll have someone from the team give you a buzz soon.";
     }
 
     messages.push({ role: "assistant", content: data.content });
