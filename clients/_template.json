@@ -1,0 +1,43 @@
+{
+  "_instructions": "Copy this file to clients/<client-name>.json, fill in the answers under \"profile\" (leave anything you don't know blank), then run scripts/setup-client.ts. The questions are below for reference.",
+  "client": "Client business name",
+  "locationId": "PASTE the GHL location id (from the GHL web address: /v2/location/<this>/...)",
+  "profile": {
+    "AI Business Name": "",
+    "AI Trade": "",
+    "AI Services": "",
+    "AI Services Not Offered": "",
+    "AI Service Area": "",
+    "AI Outside Area": "",
+    "AI Hours": "",
+    "AI After Hours": "",
+    "AI Pricing": "",
+    "AI Job Length": "",
+    "AI Qualifying Questions": "",
+    "AI Emergencies": "",
+    "AI Tone": "",
+    "AI Extra Info": "",
+    "AI Options": "",
+    "AI Calendar ID": "",
+    "AI Timezone": ""
+  },
+  "questions": {
+    "AI Business Name": "Business name, exactly as customers should see it",
+    "AI Trade": "Trade, e.g. plumber, electrician, painter, carpenter",
+    "AI Services": "Services you offer",
+    "AI Services Not Offered": "Jobs you DON'T do",
+    "AI Service Area": "Suburbs / postcodes / region you cover",
+    "AI Outside Area": "What to do with leads outside your area",
+    "AI Hours": "Normal business hours",
+    "AI After Hours": "After-hours / emergency work and any extra charge; what to tell people who ask for a call outside hours",
+    "AI Pricing": "Call-out fee or pricing the bot MAY mention (leave blank to never mention prices)",
+    "AI Job Length": "How long a typical visit/quote takes, and notice needed",
+    "AI Qualifying Questions": "What you need to know about a job before going out (e.g. photos, owner or renter, access, budget)",
+    "AI Emergencies": "What counts as an emergency for you, and how to handle it",
+    "AI Tone": "Tone: casual or formal; words to use or avoid",
+    "AI Extra Info": "Licence number, guarantees, payment methods, common questions and answers",
+    "AI Options": "Offer: both (callback or booking), callback, or booking",
+    "AI Calendar ID": "GHL calendar ID for bookings (filled in during setup)",
+    "AI Timezone": "Timezone, e.g. Australia/Brisbane"
+  }
+}

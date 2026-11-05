@@ -1,6 +1,8 @@
 import { buildSystemPrompt } from "./prompt.js";
 import type { ChatMessage } from "./ghl.js";
 import * as ghl from "./ghl.js";
+import { defaultProfile, type Profile } from "./profile.js";
+import { setLeadFields } from "./fields.js";
 
 type Block = { type: string; [k: string]: any };
 type Msg = { role: "user" | "assistant"; content: string | Block[] };
@@ -9,11 +11,15 @@ export interface Ctx {
   contactId: string;
   locationId: string;
   firstName?: string;
+  /** The client's business profile (from their GHL Custom Values). */
+  profile?: Profile;
   /** Set once the bot books, records a requested time, or the lead opts out, so the endpoint can tag the contact. */
   outcome?: "booked" | "requested" | "callback" | "opted_out";
 }
 
-const TZ = () => process.env.TIMEZONE || "Australia/Sydney";
+const profileOf = (ctx: Ctx) => ctx.profile ?? defaultProfile();
+const tzOf = (ctx: Ctx) => profileOf(ctx).timezone || "Australia/Sydney";
+const calendarOf = (ctx: Ctx) => profileOf(ctx).calendarId;
 
 /** GHL transcript -> Claude messages (alternating roles, first message is from the user). */
 export function toClaudeMessages(transcript: ChatMessage[]): Msg[] {
@@ -151,22 +157,33 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
           .filter(Boolean)
           .join("\n");
         await ghl.addNote(ctx.contactId, note);
-        await ghl.addTags(ctx.contactId, ["ai-qualified", ...(input.trade ? [`trade-${String(input.trade).toLowerCase()}`] : [])]);
+        const emergency = input.urgency === "emergency";
+        await ghl.addTags(ctx.contactId, [
+          "ai-qualified",
+          ...(input.trade ? [`trade-${String(input.trade).toLowerCase().replace(/\s+/g, "-")}`] : []),
+          ...(emergency ? ["ai-emergency"] : []),
+        ]);
+        await setLeadFields(ctx.locationId, ctx.contactId, {
+          "Service Required": input.trade ? `${input.trade}: ${input.problem}` : input.problem,
+          "Customer Suburb": input.location,
+          Urgency: input.urgency,
+          "Job Summary": [input.problem, input.photo_notes && `Photos: ${input.photo_notes}`].filter(Boolean).join(". "),
+          "Preferred Time": input.preferred_time,
+        });
         return "Saved.";
       }
       case "get_available_slots": {
-        const cal = process.env.GHL_CALENDAR_ID!;
-        const slots = await ghl.getFreeSlots(cal, Math.min(input.days_ahead || 7, 14), TZ());
+        const slots = await ghl.getFreeSlots(calendarOf(ctx), Math.min(input.days_ahead || 7, 14), tzOf(ctx));
         if (!slots.length) return "No slots available in that window. Try days_ahead 14; if still none, ask the lead what day and time suits and use request_booking.";
         const pretty = slots.map((s) => ({
           iso: s,
-          human: new Date(s).toLocaleString("en-AU", { timeZone: TZ(), weekday: "long", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }),
+          human: new Date(s).toLocaleString("en-AU", { timeZone: tzOf(ctx), weekday: "long", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }),
         }));
         return JSON.stringify(pretty);
       }
       case "book_appointment": {
         await ghl.bookAppointment({
-          calendarId: process.env.GHL_CALENDAR_ID!,
+          calendarId: calendarOf(ctx),
           locationId: ctx.locationId,
           contactId: ctx.contactId,
           startTime: input.start_time,
@@ -174,16 +191,21 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
           notes: input.summary,
         });
         ctx.outcome = "booked";
+        await setLeadFields(ctx.locationId, ctx.contactId, {
+          "Preferred Time": new Date(input.start_time).toLocaleString("en-AU", { timeZone: tzOf(ctx), dateStyle: "medium", timeStyle: "short" }),
+        });
         return "Booked successfully. Confirm the day and time to the lead in one short message.";
       }
       case "request_booking": {
         await ghl.addNote(ctx.contactId, `AI BOOKING - visit requested for: ${input.requested_time}\n${input.summary}`);
         ctx.outcome = "requested";
+        await setLeadFields(ctx.locationId, ctx.contactId, { "Preferred Time": input.requested_time });
         return "Recorded. Confirm to the lead in one short message that they're booked in and someone from the team will come out at that time.";
       }
       case "request_callback": {
         await ghl.addNote(ctx.contactId, `AI CALLBACK - call the lead: ${input.callback_time}\n${input.summary}`);
         ctx.outcome = "callback";
+        await setLeadFields(ctx.locationId, ctx.contactId, { "Callback Time": input.callback_time });
         return "Recorded. Now reply to the lead with one short, casual confirmation, e.g. \"Yep, no worries! We'll get someone from the team to give you a buzz in about 30 mins.\" (use their time, or \"soon\" if they didn't give one).";
       }
       case "opt_out": {
@@ -201,11 +223,14 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
 }
 
 export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promise<string> {
-  const canBook = !!process.env.GHL_CALENDAR_ID;
+  const profile = profileOf(ctx);
+  // Booking straight into the calendar needs a calendar, and the client must offer bookings.
+  const canBook = !!profile.calendarId && profile.options !== "callback";
   const system = buildSystemPrompt({
     firstName: ctx.firstName,
     canBook,
-    nowLocal: new Date().toLocaleString("en-AU", { timeZone: TZ(), dateStyle: "full", timeStyle: "short" }),
+    profile,
+    nowLocal: new Date().toLocaleString("en-AU", { timeZone: tzOf(ctx), dateStyle: "full", timeStyle: "short" }),
   });
   const messages: Msg[] = await inlineImages(toClaudeMessages(transcript));
   // Claude often writes the SMS in the same turn as a tool call, then says nothing after the

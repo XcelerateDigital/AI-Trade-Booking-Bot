@@ -1,16 +1,42 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 const BASE = "https://services.leadconnectorhq.com";
 
-// GHL versions its APIs per area: contacts use 2021-07-28, conversations/calendars 2021-04-15.
+/**
+ * Each client (GHL sub-account / "location") has its own Private Integration token.
+ * GHL_TOKENS is a JSON map of locationId -> token, e.g. {"ufcbt6ho...":"pit-..."}.
+ * GHL_API_TOKEN is the fallback used when a location isn't listed (single-client setups).
+ */
+export function tokenFor(locationId?: string): string | undefined {
+  if (locationId && process.env.GHL_TOKENS) {
+    try {
+      const map = JSON.parse(process.env.GHL_TOKENS);
+      if (map[locationId]) return map[locationId];
+    } catch {
+      console.error("GHL_TOKENS is not valid JSON");
+    }
+  }
+  return process.env.GHL_API_TOKEN;
+}
+
+// The token for the request being handled. AsyncLocalStorage keeps concurrent requests
+// for different clients from ever using each other's token.
+const store = new AsyncLocalStorage<{ token?: string }>();
+export function withLocation<T>(locationId: string | undefined, fn: () => Promise<T>): Promise<T> {
+  return store.run({ token: tokenFor(locationId) }, fn);
+}
+
+// GHL versions its APIs per area: contacts/locations use 2021-07-28, conversations/calendars 2021-04-15.
 function headers(path: string) {
   return {
-    Authorization: `Bearer ${process.env.GHL_API_TOKEN}`,
-    Version: path.startsWith("/contacts") ? "2021-07-28" : "2021-04-15",
+    Authorization: `Bearer ${store.getStore()?.token ?? process.env.GHL_API_TOKEN}`,
+    Version: path.startsWith("/contacts") || path.startsWith("/locations") ? "2021-07-28" : "2021-04-15",
     "Content-Type": "application/json",
     Accept: "application/json",
   };
 }
 
-async function ghl<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+export async function ghl<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { ...init, headers: { ...headers(path), ...(init.headers || {}) } });
   const text = await res.text();
   if (!res.ok) throw new Error(`GHL ${init.method || "GET"} ${path} -> ${res.status}: ${text.slice(0, 300)}`);

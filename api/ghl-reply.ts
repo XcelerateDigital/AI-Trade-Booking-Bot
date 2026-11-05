@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { findConversationId, getContact, getTranscript, sendSms, addTags, addNote } from "../lib/ghl.js";
+import { findConversationId, getContact, getTranscript, sendSms, addTags, addNote, withLocation } from "../lib/ghl.js";
 import { generateReply, type Ctx } from "../lib/ai.js";
+import { loadProfile } from "../lib/profile.js";
 
 export const config = { maxDuration: 60 };
 
@@ -23,9 +24,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const contactId: string | undefined = body.contact_id || body.contactId || body.contact?.id;
   if (!contactId) return res.status(400).json({ error: "missing contact_id" });
 
+  // Which client (GHL sub-account) this is for. GHL's webhook payload includes location.id;
+  // ?location= on the URL also works. It picks the client's own GHL token.
+  const payloadLocation: string | undefined = body.location?.id || body.locationId || body.location_id || (req.query.location as string);
+  return withLocation(payloadLocation, () => handle(req, res, body, contactId, payloadLocation));
+}
+
+async function handle(req: VercelRequest, res: VercelResponse, body: any, contactId: string, payloadLocation?: string) {
   try {
     const contact = await getContact(contactId);
-    const locationId = contact.locationId || body.location?.id || body.locationId;
+    const locationId = contact.locationId || payloadLocation;
     if (!locationId) return res.status(400).json({ error: "could not work out location" });
     // Lead opted out, or a human has taken over: stay quiet.
     if (contact.tags?.some((t) => STOP_TAGS.includes(t.toLowerCase()))) {
@@ -48,10 +56,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ skipped: "message cap" });
     }
 
-    const ctx: Ctx = { contactId, locationId, firstName: contact.firstName };
+    const profile = await loadProfile(locationId);
+    const ctx: Ctx = { contactId, locationId, firstName: contact.firstName, profile };
     const reply = await generateReply(transcript, ctx);
     if (reply) await sendSms(contactId, reply);
-    console.log("ghl-reply", { contactId, sent: !!reply, outcome: ctx.outcome ?? "continuing" });
+    console.log("ghl-reply", { business: profile.businessName, contactId, sent: !!reply, outcome: ctx.outcome ?? "continuing" });
 
     if (ctx.outcome === "booked") await addTags(contactId, ["ai-booked"]);
     if (ctx.outcome === "requested") await addTags(contactId, ["ai-booking-requested"]);
@@ -63,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Don't go silent: log it, and nudge the lead so the next reply retries the booking.
     try {
       await addNote(contactId, `AI error (bot will retry on next message): ${e.message}`);
-      await sendSms(contactId, "Sorry, small hiccup on our end. Would you like someone from the team to give you a call, or shall I book a time for them to come out?");
+      await sendSms(contactId, "Sorry, small hiccup on our end. Could you send that through again?");
     } catch {}
     return res.status(500).json({ error: "failed" });
   }

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx test/run.ts && tsx test/empty.ts"
+    "test": "tsx test/run.ts && tsx test/empty.ts && tsx test/profiles.ts",
+    "setup-client": "tsx scripts/setup-client.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

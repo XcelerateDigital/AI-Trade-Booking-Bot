@@ -1,5 +1,7 @@
 # START HERE: Set up your AI lead-reply bot
 
+> Adding another client to an existing bot? See **CLIENT-SETUP.md** instead.
+
 **What it does:** when a lead replies to your first text in GoHighLevel (GHL), an AI (Claude) reads the conversation, works out the problem, asks for photos, how urgent it is and the suburb, then asks whether they'd like a call back from someone from the team or a booked visit, and locks in whichever they pick. Every conversation ends in a callback time (tag `ai-callback`) or a booking. With a calendar connected (`GHL_CALENDAR_ID`) it offers real free slots and books them; without one it records the lead's requested time as a note and tags the contact `ai-booking-requested`.
 
 **You do NOT need to code.** Set aside about 30 minutes. You need 3 accounts: GitHub (you're here), Anthropic, and Vercel (free), plus your GHL login.
@@ -31,6 +33,8 @@ You will collect **4 values**. Keep a notes file open and paste them in as you g
    - **View Contacts** and **Edit Contacts**
    - **View Conversations** and **Edit Conversations**
    - **View Conversation Messages** and **Edit Conversation Messages**
+   - **View Calendars** and **View/Edit Calendar Events** (for booking)
+   - **View/Edit Custom Values** and **View/Edit Custom Fields** (for the business profile and lead fields)
 5. Create it and **copy the token** (starts with `pit-`). Save it as value **#2**.
 
 ## Step 3: Make up a webhook password
