@@ -82,6 +82,7 @@ const sysPlumb = claudeBodies[0].system as string;
 assert.match(sysPlumb, /Coastline Plumbing, a plumbing business/);
 assert.match(sysPlumb, /\$99 call-out fee/);
 assert.match(sysPlumb, /gas fitting, roofing/);
+assert.match(sysPlumb, /Do NOT offer a call, a booking or a referral/);
 assert.match(sysPlumb, /Gold Coast, Tweed Heads/);
 assert.match(sysPlumb, /Mon-Fri 7am-4pm/);
 assert.ok(claudeBodies[0].tools.some((t: any) => t.name === "get_available_slots"), "plumber has a calendar, so booking tools are on");
