@@ -25,9 +25,20 @@ let r = await run([empty,{stop_reason:"end_turn",content:[{type:"text",text:"Yep
 assert.deepEqual(r.sent,["Yep, no worries! We'll get someone to give you a buzz in about 25 mins."]);
 assert.match(r.bodies[1].system,/produced no SMS text/); assert.equal(r.bodies[1].tool_choice,undefined);
 assert.equal(JSON.stringify(r.bodies[1].messages), JSON.stringify(r.bodies[0].messages)); // messages untouched
-// 2. blank three times -> 3rd try has tools off; then safe fallback records a callback, no repeated question
+// 2. blank three times -> 3rd try is a clean request (plain conversation, no tools); then a backup
+//    that offers booking or callback, never repeats the last message, and leaves a note in GHL
 r = await run([empty,empty,empty]);
-assert.deepEqual(r.bodies[2].tool_choice,{type:"none"});
-assert.deepEqual(r.sent,["No worries, we'll have someone from the team give you a buzz soon."]);
-assert.ok(r.tags.includes("ai-callback")); assert.match(r.notes[0],/AI CALLBACK/);
+assert.equal(r.bodies[2].tools, undefined);
+assert.equal(JSON.stringify(r.bodies[2].messages), JSON.stringify(r.bodies[0].messages));
+assert.deepEqual(r.sent,["Thanks for that. Would you like to book a time for someone from the team to come out, or would you prefer a call back?"]);
+assert.ok(!r.tags.includes("ai-callback"), "no callback recorded without the lead asking");
+assert.match(r.notes[0],/blank replies/);
+// 3. blank after a tool call -> the clean retry produces the reply
+r = await run([
+  {stop_reason:"tool_use",content:[{type:"tool_use",id:"t",name:"save_job_details",input:{trade:"plumbing",problem:"leaky sink",urgency:"tomorrow"}}]},
+  empty, empty,
+  {stop_reason:"end_turn",content:[{type:"text",text:"Thanks! What suburb are you in?"}]}]);
+assert.deepEqual(r.sent,["Thanks! What suburb are you in?"]);
+assert.equal(r.bodies[3].tools, undefined);
+assert.match(r.bodies[3].system, /Already done this turn \(don't repeat\): saved the job details/);
 console.log("empty-reply tests passed");

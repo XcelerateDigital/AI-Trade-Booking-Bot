@@ -170,7 +170,7 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
           "Job Summary": [input.problem, input.photo_notes && `Photos: ${input.photo_notes}`].filter(Boolean).join(". "),
           "Preferred Time": input.preferred_time,
         });
-        return "Saved.";
+        return "Saved. Now write your SMS reply to the lead: the next question or step.";
       }
       case "get_available_slots": {
         const slots = await ghl.getFreeSlots(calendarOf(ctx), Math.min(input.days_ahead || 7, 14), tzOf(ctx));
@@ -232,18 +232,23 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
     profile,
     nowLocal: new Date().toLocaleString("en-AU", { timeZone: tzOf(ctx), dateStyle: "full", timeStyle: "short" }),
   });
-  const messages: Msg[] = await inlineImages(toClaudeMessages(transcript));
+  const base: Msg[] = await inlineImages(toClaudeMessages(transcript));
+  const messages: Msg[] = [...base];
   // Claude often writes the SMS in the same turn as a tool call, then says nothing after the
   // tool result. Keep every bit of text so the reply is never silently dropped.
   const said: string[] = [];
-  // Claude occasionally returns a blank reply. When that happens we retry with a stronger
-  // instruction in the SYSTEM prompt (adding text after tool results makes blanks more likely),
-  // and on the final retry we turn tools off so it has to write the SMS.
+  const done: string[] = []; // tools already run this turn, for the clean retry
+  const blanks: string[] = []; // stop reasons of blank replies, for diagnosis
+  // Claude occasionally returns a blank reply, almost always right after a tool result.
+  // Retry 1: same conversation, stronger instruction in the system prompt.
+  // Retry 2: a clean request with just the SMS conversation (no tool history, no tools),
+  //          which reliably produces text.
   let retries = 0;
   const RETRY_NOTE =
     "\n\nIMPORTANT: your previous attempt produced no SMS text. Your reply MUST contain the SMS to send to the lead. Use any tools you still need, then write the message. Use every answer they've already given and don't repeat a question.";
 
   for (let i = 0; i < 8; i++) {
+    const clean = retries >= 2;
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -254,10 +259,13 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
       body: JSON.stringify({
         model: process.env.AI_MODEL || "claude-sonnet-5-5",
         max_tokens: 500,
-        system: retries ? system + RETRY_NOTE : system,
-        tools: tools(canBook),
-        ...(retries >= 2 ? { tool_choice: { type: "none" } } : {}),
-        messages,
+        system: !retries
+          ? system
+          : clean
+            ? `${system}\n\nIMPORTANT: write the next SMS to the lead now.${done.length ? ` Already done this turn (don't repeat): ${done.join("; ")}.` : ""} Use every answer they've already given and don't repeat a question. Output only the SMS.`
+            : system + RETRY_NOTE,
+        ...(clean ? {} : { tools: tools(canBook) }),
+        messages: clean ? base : messages,
       }),
     });
     if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -266,30 +274,48 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
 
     if (text) said.push(text);
 
-    if (data.stop_reason !== "tool_use") {
+    if (data.stop_reason !== "tool_use" || clean) {
       if (text) return text;
       if (said.length) return said[said.length - 1];
-      console.warn("empty reply from Claude", { stop_reason: data.stop_reason, retries, outcome: ctx.outcome });
+      blanks.push(`${data.stop_reason}:${(data.content as Block[]).map((b) => b.type).join(",") || "empty"}`);
+      console.warn("empty reply from Claude", { blanks, retries, outcome: ctx.outcome, done });
       if (retries < 2) {
         retries++;
         continue;
       }
-      // Last resort: never leave the lead hanging, and never ask a question that may already
-      // have been answered. Make sure a human follows up by recording a callback.
-      if (ctx.outcome === "booked" || ctx.outcome === "requested") return "You're all booked in. Someone from the team will see you then.";
-      if (ctx.outcome === "opted_out") return "No worries, you won't get any more messages from us.";
-      if (ctx.outcome !== "callback") {
-        await runTool("request_callback", { callback_time: "ASAP (bot could not reply - check the conversation)", summary: "See conversation in GHL." }, ctx);
-      }
-      return "No worries, we'll have someone from the team give you a buzz soon.";
+      // Last resort: a sensible next step that never repeats the previous message.
+      await ghl.addNote(ctx.contactId, `AI note: the AI gave blank replies (${blanks.join(" | ")}); a backup message was sent. Check this conversation.`).catch(() => {});
+      return fallbackMessage(ctx, transcript);
     }
 
     messages.push({ role: "assistant", content: data.content });
     const results: Block[] = [];
     for (const b of data.content as Block[]) {
-      if (b.type === "tool_use") results.push({ type: "tool_result", tool_use_id: b.id, content: await runTool(b.name, b.input, ctx) });
+      if (b.type === "tool_use") {
+        results.push({ type: "tool_result", tool_use_id: b.id, content: await runTool(b.name, b.input, ctx) });
+        done.push(b.name === "save_job_details" ? "saved the job details" : b.name.replace(/_/g, " "));
+      }
     }
     messages.push({ role: "user", content: results });
   }
   throw new Error("Tool loop did not finish");
+}
+
+/** Backup reply when the AI can't produce one: move the lead towards a callback or booking. */
+export function fallbackMessage(ctx: Ctx, transcript: ChatMessage[]): string {
+  if (ctx.outcome === "booked" || ctx.outcome === "requested") return "You're all booked in. Someone from the team will see you then.";
+  if (ctx.outcome === "callback") return "All sorted, someone from the team will give you a buzz then.";
+  if (ctx.outcome === "opted_out") return "No worries, you won't get any more messages from us.";
+  const options = profileOf(ctx).options;
+  const ask =
+    options === "callback"
+      ? "Thanks for that. When suits for someone from the team to give you a call?"
+      : options === "booking"
+        ? "Thanks for that. What day and time suits for someone from the team to come out?"
+        : "Thanks for that. Would you like to book a time for someone from the team to come out, or would you prefer a call back?";
+  const lastSent = [...transcript].reverse().find((m) => m.direction === "outbound")?.body?.trim();
+  if (lastSent !== ask) return ask;
+  return options === "callback"
+    ? "Sorry about that. What time works best for a quick call?"
+    : "Sorry about that. What day and time suits you best?";
 }
