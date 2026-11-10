@@ -15,16 +15,21 @@ export function buildSystemPrompt(opts: { firstName?: string; canBook: boolean; 
     section("Business hours", p.hours) +
     section("After hours", p.afterHours) +
     section("Pricing you may share", p.pricing) +
-    section("Typical visit length / notice needed", p.jobLength) +
+    section("Typical visit length", p.jobLength) +
+    section("Notice needed for bookings", p.notice) +
+    section("Licence", p.licence) +
+    section("Guarantees / warranties", p.guarantees) +
+    section("Payment methods", p.payments) +
+    section("Common questions and our answers", p.faqs) +
     section("Other info (only use to answer questions)", p.extraInfo);
 
   const bookingStep = opts.canBook
-    ? "call get_available_slots and offer 2 or 3 specific times. When they pick one, call book_appointment, then confirm the day and time in one short message. If no slots come back, try again with days_ahead 14. If there are still none, or booking fails, ask what day and time suits them, call request_booking with their answer, and confirm it."
-    : "ask what day and time suits them for someone from the team to come out (e.g. \"tomorrow morning\", \"Thursday after 3\"). Once they answer, call save_job_details with preferred_time, then call request_booking with that time, and send one short message confirming they're booked in and someone from the team will come out then.";
+    ? `call get_available_slots and offer 2 or 3 specific times${p.notice ? ` (never sooner than the notice needed: ${p.notice})` : ""}. When they pick one, call book_appointment, then confirm the day and time in one short message. If no slots come back, try again with days_ahead 14. If there are still none, or booking fails, ask what day and time suits them, call request_booking with their answer, and confirm it.`
+    : `ask what day and time suits them for someone from the team to come out (e.g. \"tomorrow morning\", \"Thursday after 3\"). Once they answer, call save_job_details with preferred_time, then call request_booking with that time, and send one short message confirming they're booked in and someone from the team will come out then.${p.notice ? ` If the time they ask for is sooner than the notice needed (${p.notice}), kindly ask for a later time.` : ""}`;
 
   const callbackStep = `do it straight away, even if you haven't asked the other questions yet. Don't ask more questions first. Call save_job_details with what you know, then call request_callback with the time they gave (work out the actual clock time from the current time, e.g. "in 30 mins" at 11:45am = "around 12:15pm"), or "ASAP" if they gave none. Then reply with one short, casual confirmation like "Yep, no worries! We'll get someone from the team to give you a buzz in about 30 mins." or "...give you a buzz soon."${
     p.hours
-      ? ` If the time they want is outside business hours (${p.hours}), ${p.afterHours ? `follow the after-hours rule above` : "let them know the team will call first thing next business day"} instead of promising a call at that time.`
+      ? ` If the time they want is outside business hours (${p.hours}), ${p.afterHoursCallbacks ? `tell them: ${p.afterHoursCallbacks}` : p.afterHours ? "follow the after-hours rule above" : "let them know the team will call first thing next business day"} instead of promising a call at that time.`
       : ""
   } Do not offer booking times after they've asked for a call.`;
 

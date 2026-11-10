@@ -15,37 +15,58 @@ export interface Profile {
   outsideArea: string;
   hours: string;
   afterHours: string;
+  afterHoursCallbacks: string;
+  timezone: string;
   pricing: string;
   jobLength: string;
+  notice: string;
   qualifying: string;
-  emergencies: string;
-  tone: string;
-  extraInfo: string;
   /** Which outcomes the bot offers: "both" (default), "callback" only, or "booking" only. */
   options: "both" | "callback" | "booking";
+  emergencies: string;
+  tone: string;
+  licence: string;
+  guarantees: string;
+  payments: string;
+  faqs: string;
+  extraInfo: string;
   calendarId: string;
-  timezone: string;
+  /** Used by the GHL alert workflows (via custom values), not by the bot's replies. */
+  alertMobile: string;
+  emergencyContacts: string;
 }
 
-/** Custom Value name in GHL -> profile key. The setup script creates these for each client. */
-export const PROFILE_FIELDS: { name: string; key: keyof Profile; question: string }[] = [
-  { name: "AI Business Name", key: "businessName", question: "Business name, exactly as customers should see it" },
-  { name: "AI Trade", key: "trade", question: "Trade, e.g. plumber, electrician, painter, carpenter" },
-  { name: "AI Services", key: "services", question: "Services you offer" },
-  { name: "AI Services Not Offered", key: "notOffered", question: "Jobs you DON'T do" },
-  { name: "AI Service Area", key: "serviceArea", question: "Suburbs / postcodes / region you cover" },
-  { name: "AI Outside Area", key: "outsideArea", question: "What to do with leads outside your area" },
-  { name: "AI Hours", key: "hours", question: "Normal business hours" },
-  { name: "AI After Hours", key: "afterHours", question: "After-hours / emergency work and any extra charge; what to tell people who ask for a call outside hours" },
-  { name: "AI Pricing", key: "pricing", question: "Call-out fee or pricing the bot MAY mention (leave blank to never mention prices)" },
-  { name: "AI Job Length", key: "jobLength", question: "How long a typical visit/quote takes, and notice needed" },
-  { name: "AI Qualifying Questions", key: "qualifying", question: "What you need to know about a job before going out (e.g. photos, owner or renter, access, budget)" },
-  { name: "AI Emergencies", key: "emergencies", question: "What counts as an emergency for you, and how to handle it" },
-  { name: "AI Tone", key: "tone", question: "Tone: casual or formal; words to use or avoid" },
-  { name: "AI Extra Info", key: "extraInfo", question: "Licence number, guarantees, payment methods, common questions and answers" },
-  { name: "AI Options", key: "options", question: "Offer: both (callback or booking), callback, or booking" },
-  { name: "AI Calendar ID", key: "calendarId", question: "GHL calendar ID for bookings (filled in during setup)" },
-  { name: "AI Timezone", key: "timezone", question: "Timezone, e.g. Australia/Brisbane" },
+/**
+ * Custom Value name in GHL -> profile key. `q` is the question number in the
+ * "AI Booking Bot – Client Questionnaire" doc, so each answer maps straight across.
+ * The setup script creates these for each client.
+ */
+export const PROFILE_FIELDS: { q?: number; name: string; key: keyof Profile; question: string }[] = [
+  { q: 1, name: "AI Business Name", key: "businessName", question: "Business name, exactly as customers should see it" },
+  { q: 2, name: "AI Trade", key: "trade", question: "Your trade" },
+  { q: 3, name: "AI Services", key: "services", question: "Services you offer" },
+  { q: 4, name: "AI Services Not Offered", key: "notOffered", question: "Jobs you don't do (the assistant will politely decline these)" },
+  { q: 5, name: "AI Service Area", key: "serviceArea", question: "Suburbs, postcodes or region you cover" },
+  { q: 6, name: "AI Outside Area", key: "outsideArea", question: "What should the assistant say to leads outside your area?" },
+  { q: 7, name: "AI Hours", key: "hours", question: "Normal business hours" },
+  { q: 8, name: "AI After Hours", key: "afterHours", question: "Do you take after-hours or emergency work? Any extra charge?" },
+  { q: 9, name: "AI After Hours Callbacks", key: "afterHoursCallbacks", question: "If someone asks for a call outside your hours, what should we tell them?" },
+  { q: 10, name: "AI Timezone", key: "timezone", question: "Your timezone" },
+  { q: 11, name: "AI Pricing", key: "pricing", question: "Any call-out fee or prices the assistant may mention" },
+  { q: 12, name: "AI Job Length", key: "jobLength", question: "How long does a typical quote or visit take?" },
+  { q: 13, name: "AI Notice Needed", key: "notice", question: "How much notice do you need for a booking?" },
+  { q: 14, name: "AI Qualifying Questions", key: "qualifying", question: "Extra questions to ask every lead" },
+  { q: 15, name: "AI Options", key: "options", question: "Should leads be offered a callback, a booked visit, or both?" },
+  { q: 17, name: "AI Alert Mobile", key: "alertMobile", question: "Mobile number(s) to text when a lead books or asks for a callback" },
+  { q: 18, name: "AI Emergencies", key: "emergencies", question: "What counts as an emergency for you?" },
+  { q: 19, name: "AI Emergency Contacts", key: "emergencyContacts", question: "Who should be alerted for emergencies?" },
+  { q: 20, name: "AI Tone", key: "tone", question: "Tone: casual or formal? Any words to use or avoid?" },
+  { q: 21, name: "AI Licence", key: "licence", question: "Licence number" },
+  { q: 22, name: "AI Guarantees", key: "guarantees", question: "Guarantees or warranties" },
+  { q: 23, name: "AI Payment Methods", key: "payments", question: "Payment methods" },
+  { q: 24, name: "AI FAQs", key: "faqs", question: "Common questions customers ask, and your answers" },
+  { name: "AI Extra Info", key: "extraInfo", question: "Anything else the assistant should know (optional)" },
+  { name: "AI Calendar ID", key: "calendarId", question: "GHL calendar ID for bookings (filled in during setup from Q16's Google account)" },
 ];
 
 export function defaultProfile(): Profile {
@@ -58,15 +79,23 @@ export function defaultProfile(): Profile {
     outsideArea: "",
     hours: "",
     afterHours: "",
+    afterHoursCallbacks: "",
+    timezone: process.env.TIMEZONE || "Australia/Sydney",
     pricing: "",
     jobLength: "",
+    notice: "",
     qualifying: "",
+    options: "both",
     emergencies: "",
     tone: "",
+    licence: "",
+    guarantees: "",
+    payments: "",
+    faqs: "",
     extraInfo: "",
-    options: "both",
     calendarId: process.env.GHL_CALENDAR_ID || "",
-    timezone: process.env.TIMEZONE || "Australia/Sydney",
+    alertMobile: "",
+    emergencyContacts: "",
   };
 }
 

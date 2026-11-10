@@ -4,24 +4,33 @@ One bot serves every client. Each client's answers live in **their own GHL sub-a
 
 ## 1. Collect the answers
 
-Copy `clients/_template.json` to `clients/<client-name>.json` and fill in `profile`. The questions are listed in the same file. Leave anything unknown blank; the bot only uses what's filled in.
+Send the tradie the **AI Booking Bot – Client Questionnaire** doc. Each answer maps to one GHL Custom Value:
 
-| Custom Value | What it controls |
-|---|---|
-| AI Business Name | The name the bot uses |
-| AI Trade | e.g. `plumbing`, `painting`, `electrical` |
-| AI Services / AI Services Not Offered | What the bot accepts, and what it politely declines (offering a quick call instead) |
-| AI Service Area / AI Outside Area | Where they work, and what to say to leads outside it |
-| AI Hours / AI After Hours | Callbacks requested outside hours are moved to the next business day unless After Hours says otherwise |
-| AI Pricing | The ONLY prices the bot may mention. Blank = never mentions prices |
-| AI Job Length | Typical visit length and notice needed |
-| AI Qualifying Questions | Extra questions the bot asks (e.g. "owner or renter, how many rooms") |
-| AI Emergencies | Extra emergency rules |
-| AI Tone | Casual/formal, words to use or avoid |
-| AI Extra Info | Licence, guarantees, payment methods, FAQs. Used only to answer questions |
-| AI Options | `both` (default), `callback` only, or `booking` only |
-| AI Calendar ID | GHL calendar to book into (Settings > Calendars, copy icon next to the ID) |
-| AI Timezone | e.g. `Australia/Brisbane` (Queensland has no daylight saving) |
+| Q | Custom Value | Used for |
+|---|---|---|
+| 1 | AI Business Name | The name the bot uses |
+| 2 | AI Trade | e.g. `plumbing`, `painting` |
+| 3 | AI Services | What the bot accepts |
+| 4 | AI Services Not Offered | Politely declined, with a quick call offered |
+| 5 | AI Service Area | Where they work |
+| 6 | AI Outside Area | What to say to leads outside it |
+| 7 | AI Hours | Business hours |
+| 8 | AI After Hours | After-hours / emergency work and charges |
+| 9 | AI After Hours Callbacks | What to say when a call is wanted outside hours |
+| 10 | AI Timezone | e.g. `Australia/Brisbane` (no daylight saving) |
+| 11 | AI Pricing | The ONLY prices the bot may mention; blank = none |
+| 12 | AI Job Length | Typical visit length |
+| 13 | AI Notice Needed | The bot won't book sooner than this |
+| 14 | AI Qualifying Questions | Extra questions the bot asks |
+| 15 | AI Options | `both`, `callback` or `booking` |
+| 16 | (setup) | Google account to connect the calendar → **AI Calendar ID** |
+| 17 | AI Alert Mobile | Alert workflows only: never shown to the AI |
+| 18 | AI Emergencies | What counts as an emergency |
+| 19 | AI Emergency Contacts | Alert workflows only: never shown to the AI |
+| 20 | AI Tone | Casual/formal, words to use or avoid |
+| 21–24 | AI Licence, AI Guarantees, AI Payment Methods, AI FAQs | Used only to answer customers' questions |
+
+Paste the answers into `clients/<client-name>.json` (copy `clients/_template.json`; it lists the Q numbers), or paste the doc into the chat and Claude will do it.
 
 ## 2. Create the client's GHL token
 
@@ -53,7 +62,7 @@ Add the new client, save, then redeploy. (`GHL_API_TOKEN` is still used for any 
 
 - **Opener**: Pipeline stage = New Lead → Send SMS (first text, ending `– {{location.name}} (reply STOP to opt out)`).
 - **AI Lead Replies**: Customer Replied (SMS), **filtered** to new leads (e.g. pipeline stage or tag) → Webhook POST to `https://<bot>.vercel.app/api/ghl-reply?secret=<WEBHOOK_SECRET>`.
-- **Alerts**: tag added `ai-callback` / `ai-booked` / `ai-booking-requested` / `ai-emergency` → Internal Notification (SMS) to the tradie.
+- **Alerts**: tag added `ai-callback` / `ai-booked` / `ai-booking-requested` / `ai-emergency` → Internal Notification (SMS) to the tradie. For the number, use the custom value `{{custom_values.ai_alert_mobile}}` (pick it from the tag icon) so it follows Q17.
 
 ## 6. Test
 

@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+const { buildSystemPrompt } = await import("../lib/prompt");
+const { defaultProfile, PROFILE_FIELDS } = await import("../lib/profile");
+const p = { ...defaultProfile(), businessName: "Coastline Plumbing", hours: "Mon-Fri 7am-4pm", afterHoursCallbacks: "someone will ring at 7am", notice: "at least 2 hours", licence: "QBCC 1234567", guarantees: "12-month workmanship", payments: "card or bank transfer", faqs: "Do you clean up? Yes", alertMobile: "0412 345 678", emergencyContacts: "Dave 0412" };
+const sys = buildSystemPrompt({ canBook: true, nowLocal: "now", profile: p });
+for (const s of ["QBCC 1234567", "12-month workmanship", "card or bank transfer", "Do you clean up", "at least 2 hours", "someone will ring at 7am"]) assert.ok(sys.includes(s), s);
+assert.ok(!sys.includes("0412"), "alert phone numbers never go to the AI");
+const qs = PROFILE_FIELDS.map(f => f.q).filter(Boolean);
+for (let i = 1; i <= 24; i++) if (i !== 16) assert.ok(qs.includes(i), "question " + i + " mapped");
+console.log("questionnaire mapping tests passed");

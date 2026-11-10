@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx test/run.ts && tsx test/empty.ts && tsx test/profiles.ts",
+    "test": "tsx test/run.ts && tsx test/empty.ts && tsx test/profiles.ts && tsx test/questionnaire.ts",
     "setup-client": "tsx scripts/setup-client.ts"
   },
   "devDependencies": {
