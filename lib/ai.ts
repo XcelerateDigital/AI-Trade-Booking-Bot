@@ -241,14 +241,19 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
   const blanks: string[] = []; // stop reasons of blank replies, for diagnosis
   // Claude occasionally returns a blank reply, almost always right after a tool result.
   // Retry 1: same conversation, stronger instruction in the system prompt.
-  // Retry 2: a clean request with just the SMS conversation (no tool history, no tools),
-  //          which reliably produces text.
+  // Retry 2: a clean request with just the SMS conversation (no tool history), tools still
+  //          available so a callback or booking can still be recorded.
   let retries = 0;
+  let clean = false;
   const RETRY_NOTE =
     "\n\nIMPORTANT: your previous attempt produced no SMS text. Your reply MUST contain the SMS to send to the lead. Use any tools you still need, then write the message. Use every answer they've already given and don't repeat a question.";
 
   for (let i = 0; i < 8; i++) {
-    const clean = retries >= 2;
+    if (retries >= 2 && !clean) {
+      clean = true;
+      messages.length = 0;
+      messages.push(...base);
+    }
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -264,8 +269,8 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
           : clean
             ? `${system}\n\nIMPORTANT: write the next SMS to the lead now.${done.length ? ` Already done this turn (don't repeat): ${done.join("; ")}.` : ""} Use every answer they've already given and don't repeat a question. Output only the SMS.`
             : system + RETRY_NOTE,
-        ...(clean ? {} : { tools: tools(canBook) }),
-        messages: clean ? base : messages,
+        tools: tools(canBook),
+        messages,
       }),
     });
     if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -274,9 +279,9 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
 
     if (text) said.push(text);
 
-    if (data.stop_reason !== "tool_use" || clean) {
-      if (text) return text;
-      if (said.length) return said[said.length - 1];
+    if (data.stop_reason !== "tool_use") {
+      if (text) return await ensureRecorded(text, ctx, transcript);
+      if (said.length) return await ensureRecorded(said[said.length - 1], ctx, transcript);
       blanks.push(`${data.stop_reason}:${(data.content as Block[]).map((b) => b.type).join(",") || "empty"}`);
       console.warn("empty reply from Claude", { blanks, retries, outcome: ctx.outcome, done });
       if (retries < 2) {
@@ -318,4 +323,18 @@ export function fallbackMessage(ctx: Ctx, transcript: ChatMessage[]): string {
   return options === "callback"
     ? "Sorry about that. What time works best for a quick call?"
     : "Sorry about that. What day and time suits you best?";
+}
+
+/**
+ * Safety net: if the reply promises a call but no callback was recorded, record one, so the
+ * tradie is always alerted when the lead has been told someone will ring.
+ */
+async function ensureRecorded(reply: string, ctx: Ctx, transcript: ChatMessage[]): Promise<string> {
+  if (ctx.outcome) return reply;
+  const promisesCall = /\b(give you a (buzz|call|ring)|call you|ring you|be in touch by phone)\b/i.test(reply);
+  if (!promisesCall) return reply;
+  const lastIn = [...transcript].reverse().find((m) => m.direction === "inbound")?.body ?? "";
+  console.warn("reply promised a call without recording it; recording now");
+  await runTool("request_callback", { callback_time: lastIn.slice(0, 120) || "ASAP", summary: `Lead was told: "${reply}"` }, ctx);
+  return reply;
 }

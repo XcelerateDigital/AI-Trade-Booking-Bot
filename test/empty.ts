@@ -28,17 +28,26 @@ assert.equal(JSON.stringify(r.bodies[1].messages), JSON.stringify(r.bodies[0].me
 // 2. blank three times -> 3rd try is a clean request (plain conversation, no tools); then a backup
 //    that offers booking or callback, never repeats the last message, and leaves a note in GHL
 r = await run([empty,empty,empty]);
-assert.equal(r.bodies[2].tools, undefined);
+assert.ok(r.bodies[2].tools, "clean retry keeps tools so it can still record a callback");
 assert.equal(JSON.stringify(r.bodies[2].messages), JSON.stringify(r.bodies[0].messages));
 assert.deepEqual(r.sent,["Thanks for that. Would you like to book a time for someone from the team to come out, or would you prefer a call back?"]);
 assert.ok(!r.tags.includes("ai-callback"), "no callback recorded without the lead asking");
 assert.match(r.notes[0],/blank replies/);
-// 3. blank after a tool call -> the clean retry produces the reply
+// 3. blank after a tool call -> the clean retry (tools on, no tool history) records the callback
 r = await run([
   {stop_reason:"tool_use",content:[{type:"tool_use",id:"t",name:"save_job_details",input:{trade:"plumbing",problem:"leaky sink",urgency:"tomorrow"}}]},
   empty, empty,
-  {stop_reason:"end_turn",content:[{type:"text",text:"Thanks! What suburb are you in?"}]}]);
-assert.deepEqual(r.sent,["Thanks! What suburb are you in?"]);
-assert.equal(r.bodies[3].tools, undefined);
+  {stop_reason:"tool_use",content:[{type:"tool_use",id:"c",name:"request_callback",input:{callback_time:"9am tomorrow",summary:"leaky sink"}}]},
+  {stop_reason:"end_turn",content:[{type:"text",text:"Yep, no worries! Someone will give you a buzz around 9am tomorrow."}]}]);
+assert.deepEqual(r.sent,["Yep, no worries! Someone will give you a buzz around 9am tomorrow."]);
 assert.match(r.bodies[3].system, /Already done this turn \(don't repeat\): saved the job details/);
+assert.equal(JSON.stringify(r.bodies[3].messages), JSON.stringify(r.bodies[0].messages));
+assert.ok(r.tags.includes("ai-callback"));
+// 4. reply promises a call but the AI forgot the tool -> safety net records it
+r = await run([{stop_reason:"end_turn",content:[{type:"text",text:"No worries! Someone from the team will give you a buzz around 9am tomorrow."}]}]);
+assert.ok(r.tags.includes("ai-callback"), "callback recorded by the safety net");
+assert.match(r.notes.join("\n"), /AI CALLBACK/);
+// 5. a normal question doesn't trigger it
+r = await run([{stop_reason:"end_turn",content:[{type:"text",text:"What suburb are you in?"}]}]);
+assert.ok(!r.tags.includes("ai-callback"));
 console.log("empty-reply tests passed");
