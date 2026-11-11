@@ -44,6 +44,16 @@ export function toClaudeMessages(transcript: ChatMessage[]): Msg[] {
 const MAX_IMAGE_BYTES = 4_500_000; // Claude's limit is 5MB per image
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
+/** Work out the real image type from the file's first bytes (hosts often label photos "octet-stream"). */
+export function sniffImageType(buf: Buffer): string | undefined {
+  if (buf.length < 12) return undefined;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf[0] === 0x89 && buf.toString("ascii", 1, 4) === "PNG") return "image/png";
+  if (buf.toString("ascii", 0, 3) === "GIF") return "image/gif";
+  if (buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  return undefined;
+}
+
 /**
  * Claude can't fetch many photo hosts itself (robots.txt blocks, auth, etc.), so download
  * each photo here and send it inline as base64. If one can't be loaded, say so in text
@@ -59,9 +69,13 @@ export async function inlineImages(messages: Msg[]): Promise<Msg[]> {
         try {
           const r = await fetch(b.source.url);
           if (!r.ok) return note;
-          const type = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
           const buf = Buffer.from(await r.arrayBuffer());
-          if (!IMAGE_TYPES.includes(type) || buf.length > MAX_IMAGE_BYTES) return note;
+          const header = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+          const type = sniffImageType(buf) ?? (IMAGE_TYPES.includes(header) ? header : undefined);
+          if (!type || buf.length > MAX_IMAGE_BYTES) {
+            console.warn("photo not usable", { header, bytes: buf.length, sniffed: sniffImageType(buf) });
+            return note;
+          }
           return { type: "image", source: { type: "base64", media_type: type, data: buf.toString("base64") } };
         } catch {
           return note;
@@ -263,7 +277,7 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
       },
       body: JSON.stringify({
         model: process.env.AI_MODEL || "claude-sonnet-5-5",
-        max_tokens: 500,
+        max_tokens: 4000,
         system: !retries
           ? system
           : clean
@@ -290,7 +304,7 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
       }
       // Last resort: a sensible next step that never repeats the previous message.
       await ghl.addNote(ctx.contactId, `AI note: the AI gave blank replies (${blanks.join(" | ")}); a backup message was sent. Check this conversation.`).catch(() => {});
-      return fallbackMessage(ctx, transcript);
+      return await fallbackMessage(ctx, transcript);
     }
 
     messages.push({ role: "assistant", content: data.content });
@@ -306,23 +320,32 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
   throw new Error("Tool loop did not finish");
 }
 
-/** Backup reply when the AI can't produce one: move the lead towards a callback or booking. */
-export function fallbackMessage(ctx: Ctx, transcript: ChatMessage[]): string {
+/** Backup reply when the AI can't produce one: follow what the lead just asked for. */
+export async function fallbackMessage(ctx: Ctx, transcript: ChatMessage[]): Promise<string> {
   if (ctx.outcome === "booked" || ctx.outcome === "requested") return "You're all booked in. Someone from the team will see you then.";
   if (ctx.outcome === "callback") return "All sorted, someone from the team will give you a buzz then.";
   if (ctx.outcome === "opted_out") return "No worries, you won't get any more messages from us.";
   const options = profileOf(ctx).options;
+  const lastIn = [...transcript].reverse().find((m) => m.direction === "inbound")?.body?.trim() ?? "";
+  const recentOut = transcript.filter((m) => m.direction === "outbound").slice(-3).map((m) => m.body?.trim());
+
+  // They asked for a call: record it and confirm, never ask "book or call?" again.
+  if (options !== "booking" && /\b(call|ring|buzz|phone)\b/i.test(lastIn)) {
+    await runTool("request_callback", { callback_time: lastIn.slice(0, 120), summary: "See conversation in GHL (backup reply)." }, ctx);
+    return "No worries, we'll get someone from the team to give you a buzz then.";
+  }
+  if (options !== "callback" && /\b(book|come out|come round|visit|appointment|today|tomorrow|morning|afternoon)\b/i.test(lastIn)) {
+    const ask = "No worries. What day and time suits best for someone from the team to come out?";
+    if (!recentOut.includes(ask)) return ask;
+  }
   const ask =
     options === "callback"
       ? "Thanks for that. When suits for someone from the team to give you a call?"
       : options === "booking"
         ? "Thanks for that. What day and time suits for someone from the team to come out?"
         : "Thanks for that. Would you like to book a time for someone from the team to come out, or would you prefer a call back?";
-  const lastSent = [...transcript].reverse().find((m) => m.direction === "outbound")?.body?.trim();
-  if (lastSent !== ask) return ask;
-  return options === "callback"
-    ? "Sorry about that. What time works best for a quick call?"
-    : "Sorry about that. What day and time suits you best?";
+  if (!recentOut.includes(ask)) return ask;
+  return "Sorry about that, I missed that one. Could you send it through again?";
 }
 
 /**
