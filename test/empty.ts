@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+process.env.REPLY_DELAY_MS = "0";
 process.env.WEBHOOK_SECRET="s"; process.env.GHL_API_TOKEN="t"; process.env.ANTHROPIC_API_KEY="k";
 const handler = (await import("../api/ghl-reply")).default;
 const res:any={status:()=>res,json:()=>res,end:()=>res};

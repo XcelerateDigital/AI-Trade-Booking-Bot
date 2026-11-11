@@ -30,6 +30,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return withLocation(payloadLocation, () => handle(req, res, body, contactId, payloadLocation));
 }
 
+const DEBOUNCE_MS = Number(process.env.REPLY_DELAY_MS ?? 8000);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const counts = (t: { direction: string }[]) => ({
+  inbound: t.filter((m) => m.direction === "inbound").length,
+  outbound: t.filter((m) => m.direction === "outbound").length,
+});
+
 async function handle(req: VercelRequest, res: VercelResponse, body: any, contactId: string, payloadLocation?: string) {
   try {
     const contact = await getContact(contactId);
@@ -43,10 +50,20 @@ async function handle(req: VercelRequest, res: VercelResponse, body: any, contac
     const conversationId = await findConversationId(contactId, locationId);
     if (!conversationId) return res.status(200).json({ skipped: "no conversation" });
 
-    const transcript = await getTranscript(conversationId);
+    let transcript = await getTranscript(conversationId);
     const last = transcript[transcript.length - 1];
     // Duplicate webhook, or we've already answered the latest message.
     if (!last || last.direction !== "inbound") return res.status(200).json({ skipped: "nothing to answer" });
+
+    // Double-texters: people often send two or three texts in a row ("toilet's blocked" ...
+    // "it's overflowing"). Wait a few seconds; if another text arrives, this webhook stands down
+    // and the newer one answers everything in one reply.
+    const seen = counts(transcript);
+    await sleep(DEBOUNCE_MS);
+    transcript = await getTranscript(conversationId);
+    const now = counts(transcript);
+    if (now.inbound > seen.inbound) return res.status(200).json({ skipped: "newer message will be answered" });
+    if (now.outbound > seen.outbound) return res.status(200).json({ skipped: "already answered" });
 
     // Runaway guard: cap how many replies the bot sends per lead.
     const botReplies = transcript.filter((m) => m.direction === "outbound").length;
@@ -58,7 +75,18 @@ async function handle(req: VercelRequest, res: VercelResponse, body: any, contac
 
     const profile = await loadProfile(locationId);
     const ctx: Ctx = { contactId, locationId, firstName: contact.firstName, profile };
-    const reply = await generateReply(transcript, ctx);
+    let reply = await generateReply(transcript, ctx);
+    // Before sending, check nothing changed while the AI was thinking:
+    // - someone else (a duplicate webhook or a person) already replied -> don't double up
+    // - the lead sent another text -> write one reply that covers it too
+    for (let i = 0; i < 2 && reply; i++) {
+      const latest = await getTranscript(conversationId);
+      const c = counts(latest);
+      if (c.outbound > now.outbound) return res.status(200).json({ skipped: "already answered", outcome: ctx.outcome ?? "continuing" });
+      if (c.inbound === counts(transcript).inbound) break;
+      transcript = latest;
+      reply = await generateReply(transcript, ctx);
+    }
     if (reply) await sendSms(contactId, reply);
     console.log("ghl-reply", { business: profile.businessName, contactId, sent: !!reply, outcome: ctx.outcome ?? "continuing" });
 

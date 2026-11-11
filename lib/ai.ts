@@ -13,6 +13,8 @@ export interface Ctx {
   firstName?: string;
   /** The client's business profile (from their GHL Custom Values). */
   profile?: Profile;
+  /** Actions already taken earlier in this webhook (kept if the reply is regenerated). */
+  done?: string[];
   /** Set once the bot books, records a requested time, or the lead opts out, so the endpoint can tag the contact. */
   outcome?: "booked" | "requested" | "callback" | "opted_out";
 }
@@ -251,7 +253,8 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
   // Claude often writes the SMS in the same turn as a tool call, then says nothing after the
   // tool result. Keep every bit of text so the reply is never silently dropped.
   const said: string[] = [];
-  const done: string[] = []; // tools already run this turn, for the clean retry
+  const done: string[] = (ctx.done ??= []); // tools already run this turn (shared across regenerations)
+  const doneBefore = done.length;
   const blanks: string[] = []; // stop reasons of blank replies, for diagnosis
   // Claude occasionally returns a blank reply, almost always right after a tool result.
   // Retry 1: same conversation, stronger instruction in the system prompt.
@@ -279,7 +282,9 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
         model: process.env.AI_MODEL || "claude-sonnet-5-5",
         max_tokens: 4000,
         system: !retries
-          ? system
+          ? doneBefore
+            ? `${system}\n\nAlready done for this lead in the last few seconds (don't repeat, just mention it if relevant): ${done.slice(0, doneBefore).join("; ")}.`
+            : system
           : clean
             ? `${system}\n\nIMPORTANT: write the next SMS to the lead now.${done.length ? ` Already done this turn (don't repeat): ${done.join("; ")}.` : ""} Use every answer they've already given and don't repeat a question. Output only the SMS.`
             : system + RETRY_NOTE,
@@ -312,7 +317,17 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
     for (const b of data.content as Block[]) {
       if (b.type === "tool_use") {
         results.push({ type: "tool_result", tool_use_id: b.id, content: await runTool(b.name, b.input, ctx) });
-        done.push(b.name === "save_job_details" ? "saved the job details" : b.name.replace(/_/g, " "));
+        done.push(
+          b.name === "save_job_details"
+            ? "saved the job details"
+            : b.name === "book_appointment"
+              ? `booked ${b.input?.start_time ?? "an appointment"}`
+              : b.name === "request_callback"
+                ? `recorded a callback for ${b.input?.callback_time ?? "ASAP"}`
+                : b.name === "request_booking"
+                  ? `recorded a booking request for ${b.input?.requested_time ?? "their time"}`
+                  : b.name.replace(/_/g, " "),
+        );
       }
     }
     messages.push({ role: "user", content: results });

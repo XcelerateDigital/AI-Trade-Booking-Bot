@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 // Two pretend clients on ONE bot: a plumber and a painter, each with their own GHL token.
+process.env.REPLY_DELAY_MS = "0";
 process.env.WEBHOOK_SECRET = "s";
 process.env.ANTHROPIC_API_KEY = "k";
 process.env.GHL_API_TOKEN = "pit-default";

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+process.env.REPLY_DELAY_MS = "0";
 process.env.WEBHOOK_SECRET = "s3cret";
 process.env.GHL_API_TOKEN = "t";
 process.env.ANTHROPIC_API_KEY = "k";
