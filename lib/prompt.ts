@@ -1,8 +1,10 @@
-import type { Profile } from "./profile.js";
+import { defaultProfile, type Profile } from "./profile.js";
 
 export function buildSystemPrompt(opts: { firstName?: string; canBook: boolean; nowLocal: string; profile: Profile }) {
   const p = opts.profile;
   const biz = p.businessName;
+  // A client who has told us their trade (or listed services) only wants jobs in that trade.
+  const specificTrade = !!p.services || p.trade !== defaultProfile().trade;
   const offerCallback = p.options !== "booking";
   const offerBooking = p.options !== "callback";
 
@@ -89,8 +91,8 @@ Never just say "the team will be in touch" or leave it open-ended, and never sto
   }.${p.emergencies ? ` ${biz}'s emergency rules: ${p.emergencies}` : ""}
 - If the lead is stressed, angry or asks for a real person: stay calm, keep it short, and offer a call back from the team at a time that suits them.
 - ${
-    p.notOffered
-      ? `If the job is one ${biz} doesn't do (${p.notOffered}), politely tell them in one short message that it's not something ${biz} can help with, and wish them luck (e.g. "Sorry Sam, roofing isn't something we do at ${biz}, so we won't be able to help with this one. Best of luck getting it sorted!"). Do NOT offer a call, a booking or a referral, and don't ask any more questions about that job. If they then mention a different job that ${biz} does do, carry on as normal for that job.`
+    p.notOffered || specificTrade
+      ? `${biz} is a ${p.trade} business${p.services ? ` (services: ${p.services})` : ""}. If the job is one ${biz} doesn't do${p.notOffered ? ` (${p.notOffered})` : ""}, or is clearly a different trade (e.g. carpentry, decking, roofing, painting or electrical for a plumber), politely tell them in one short message that it's not something ${biz} can help with, and wish them luck (e.g. "Sorry Sam, decking isn't something we do at ${biz}, so we won't be able to help with this one. Best of luck getting it sorted!"). Do NOT offer a call, a booking or a referral, ask for photos, or ask any more questions about that job. If it's unclear whether it's ${p.trade} work, ask one quick question to check. If they then mention a job ${biz} does do, carry on as normal for that job.`
       : "If the job sounds unusual, still lock it in and describe it accurately in save_job_details."
   }
 - ${

@@ -83,6 +83,7 @@ assert.match(sysPlumb, /Coastline Plumbing, a plumbing business/);
 assert.match(sysPlumb, /\$99 call-out fee/);
 assert.match(sysPlumb, /gas fitting, roofing/);
 assert.match(sysPlumb, /Do NOT offer a call, a booking or a referral/);
+assert.match(sysPlumb, /clearly a different trade/);
 assert.match(sysPlumb, /Gold Coast, Tweed Heads/);
 assert.match(sysPlumb, /Mon-Fri 7am-4pm/);
 assert.ok(claudeBodies[0].tools.some((t: any) => t.name === "get_available_slots"), "plumber has a calendar, so booking tools are on");
@@ -108,12 +109,14 @@ assert.match(sysPaint, /relaxed and friendly/);
 assert.doesNotMatch(sysPaint, /Coastline|\$99/, "no leakage from the other client");
 assert.doesNotMatch(sysPaint, /Prices: you may share/, "painter set no pricing");
 assert.match(sysPaint, /Do not quote prices/);
+assert.match(sysPaint, /Brush Bros Painting is a painting business/, "trade set -> other trades declined even with no not-offered list");
 assert.ok(!claudeBodies[0].tools.some((t: any) => t.name === "get_available_slots"), "painter has no calendar booking tools");
 
 // ---- No profile at all (custom values unreadable): falls back to env, still works ----
 const p = defaultProfile();
 const sysDefault = buildSystemPrompt({ canBook: false, nowLocal: "now", profile: p });
 assert.match(sysDefault, /home maintenance/);
+assert.doesNotMatch(sysDefault, /clearly a different trade/, "no trade set -> accept any job");
 assert.match(sysDefault, /Would you like someone from the team to give you a call, or shall I book/);
 
 console.log("profile tests passed");

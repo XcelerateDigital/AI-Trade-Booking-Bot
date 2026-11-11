@@ -11,7 +11,7 @@ Send the tradie the **AI Booking Bot – Client Questionnaire** doc. Each answer
 | 1 | AI Business Name | The name the bot uses |
 | 2 | AI Trade | e.g. `plumbing`, `painting` |
 | 3 | AI Services | What the bot accepts |
-| 4 | AI Services Not Offered | Politely declined ("sorry, we can't help with that one"), no call or booking offered |
+| 4 | AI Services Not Offered | Politely declined (jobs clearly in another trade are declined too, once AI Trade is set) ("sorry, we can't help with that one"), no call or booking offered |
 | 5 | AI Service Area | Where they work |
 | 6 | AI Outside Area | What to say to leads outside it |
 | 7 | AI Hours | Business hours |
