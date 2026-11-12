@@ -109,8 +109,15 @@ const tools = (canBook: boolean) => [
     ? [
         {
           name: "get_available_slots",
-          description: "Get the next available appointment slots from the calendar.",
-          input_schema: { type: "object", properties: { days_ahead: { type: "integer", default: 7 } } },
+          description:
+            "Get free appointment times from the calendar (the notice period is already applied). With no date: a spread of the next available times across several days. With date: every free time on that day, to check a day/time the lead asked for.",
+          input_schema: {
+            type: "object",
+            properties: {
+              date: { type: "string", description: "Optional. A specific day to check, YYYY-MM-DD (e.g. the Monday the lead asked about)" },
+              days_ahead: { type: "integer", default: 14 },
+            },
+          },
         },
         {
           name: "book_appointment",
@@ -189,13 +196,28 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
         return "Saved. Now write your SMS reply to the lead: the next question or step.";
       }
       case "get_available_slots": {
-        const slots = await ghl.getFreeSlots(calendarOf(ctx), Math.min(input.days_ahead || 7, 14), tzOf(ctx));
-        if (!slots.length) return "No slots available in that window. Try days_ahead 14; if still none, ask the lead what day and time suits and use request_booking.";
+        const tz = tzOf(ctx);
+        const earliest = Date.now() + noticeMs(profileOf(ctx).notice);
+        let from = earliest;
+        let to = earliest + Math.min(input.days_ahead || 14, 30) * 86_400_000;
+        if (input.date && /^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+          // The whole requested day in the business's timezone (pad a day each side, then filter).
+          from = Math.max(earliest, Date.parse(`${input.date}T00:00:00Z`) - 86_400_000);
+          to = Date.parse(`${input.date}T23:59:59Z`) + 86_400_000;
+        }
+        let slots = (await ghl.getFreeSlots(calendarOf(ctx), from, to, tz)).filter((s) => Date.parse(s) >= earliest);
+        const day = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: tz });
+        if (input.date) slots = slots.filter((s) => day(s) === input.date);
+        else slots = spreadAcrossDays(slots, day);
+        if (!slots.length)
+          return input.date
+            ? `No free times on ${input.date}${profileOf(ctx).notice ? ` (allowing for ${profileOf(ctx).notice} notice)` : ""}. Offer the lead other times: call get_available_slots without a date.`
+            : "No free times in the next two weeks. Ask the lead what day and time suits and use request_booking.";
         const pretty = slots.map((s) => ({
           iso: s,
-          human: new Date(s).toLocaleString("en-AU", { timeZone: tzOf(ctx), weekday: "long", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }),
+          human: new Date(s).toLocaleString("en-AU", { timeZone: tz, weekday: "long", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }),
         }));
-        return JSON.stringify(pretty);
+        return JSON.stringify(pretty) + "\nBook with book_appointment using the exact iso value of the time the lead picks.";
       }
       case "book_appointment": {
         await ghl.bookAppointment({
@@ -375,4 +397,29 @@ async function ensureRecorded(reply: string, ctx: Ctx, transcript: ChatMessage[]
   console.warn("reply promised a call without recording it; recording now");
   await runTool("request_callback", { callback_time: lastIn.slice(0, 120) || "ASAP", summary: `Lead was told: "${reply}"` }, ctx);
   return reply;
+}
+
+/** "at least 24 hours", "2 hrs", "1 day", "48h" -> milliseconds (0 if not understood). */
+export function noticeMs(notice: string): number {
+  const m = (notice || "").toLowerCase().match(/(\d+(?:\.\d+)?)\s*(minute|min|hour|hr|h\b|day|d\b|week|wk)/);
+  if (!m) return 0;
+  const n = parseFloat(m[1]);
+  const unit = m[2];
+  if (unit.startsWith("min")) return n * 60_000;
+  if (unit.startsWith("h")) return n * 3_600_000;
+  if (unit.startsWith("d")) return n * 86_400_000;
+  return n * 7 * 86_400_000;
+}
+
+/** Up to 2 times per day (morning and afternoon if possible) across the next few days, max 8. */
+export function spreadAcrossDays(slots: string[], dayOf: (iso: string) => string, max = 8): string[] {
+  const byDay = new Map<string, string[]>();
+  for (const s of slots) byDay.set(dayOf(s), [...(byDay.get(dayOf(s)) ?? []), s]);
+  const out: string[] = [];
+  for (const list of byDay.values()) {
+    out.push(list[0]);
+    if (list.length > 1) out.push(list[Math.floor(list.length / 2)]);
+    if (out.length >= max) break;
+  }
+  return out.slice(0, max);
 }

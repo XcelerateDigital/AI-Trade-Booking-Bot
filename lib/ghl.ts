@@ -93,18 +93,17 @@ export async function getContact(contactId: string) {
 }
 
 /** Returns up to `max` upcoming slots as ISO strings. */
-export async function getFreeSlots(calendarId: string, days: number, tz: string, max = 6): Promise<string[]> {
-  const start = Date.now();
-  const end = start + days * 86_400_000;
+/** All free slot start times (ISO strings, sorted) between two moments. */
+export async function getFreeSlots(calendarId: string, startMs: number, endMs: number, tz: string): Promise<string[]> {
   const r = await ghl(
-    `/calendars/${calendarId}/free-slots?startDate=${start}&endDate=${end}&timezone=${encodeURIComponent(tz)}`,
+    `/calendars/${calendarId}/free-slots?startDate=${startMs}&endDate=${endMs}&timezone=${encodeURIComponent(tz)}`,
   );
   const slots: string[] = [];
   for (const [key, val] of Object.entries<any>(r)) {
     if (key === "traceId") continue;
     slots.push(...(val?.slots ?? []));
   }
-  return slots.sort().slice(0, max);
+  return slots.sort();
 }
 
 export async function bookAppointment(opts: {
