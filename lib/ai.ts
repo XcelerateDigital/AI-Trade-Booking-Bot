@@ -13,6 +13,8 @@ export interface Ctx {
   firstName?: string;
   /** The client's business profile (from their GHL Custom Values). */
   profile?: Profile;
+  /** Time (ms since epoch) by which a reply must be ready, so we never hit the server's time limit. */
+  deadline?: number;
   /** Actions already taken earlier in this webhook (kept if the reply is regenerated). */
   done?: string[];
   /** Set once the bot books, records a requested time, or the lead opts out, so the endpoint can tag the contact. */
@@ -229,6 +231,7 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
           notes: input.summary,
         });
         ctx.outcome = "booked";
+        await ghl.addTags(ctx.contactId, ["ai-booked"]);
         await setLeadFields(ctx.locationId, ctx.contactId, {
           "Preferred Time": new Date(input.start_time).toLocaleString("en-AU", { timeZone: tzOf(ctx), dateStyle: "medium", timeStyle: "short" }),
         });
@@ -237,12 +240,14 @@ async function runTool(name: string, input: any, ctx: Ctx): Promise<string> {
       case "request_booking": {
         await ghl.addNote(ctx.contactId, `AI BOOKING - visit requested for: ${input.requested_time}\n${input.summary}`);
         ctx.outcome = "requested";
+        await ghl.addTags(ctx.contactId, ["ai-booking-requested"]);
         await setLeadFields(ctx.locationId, ctx.contactId, { "Preferred Time": input.requested_time });
         return "Recorded. Confirm to the lead in one short message that they're booked in and someone from the team will come out at that time.";
       }
       case "request_callback": {
         await ghl.addNote(ctx.contactId, `AI CALLBACK - call the lead: ${input.callback_time}\n${input.summary}`);
         ctx.outcome = "callback";
+        await ghl.addTags(ctx.contactId, ["ai-callback"]);
         await setLeadFields(ctx.locationId, ctx.contactId, { "Callback Time": input.callback_time });
         return "Recorded. Now reply to the lead with one short, casual confirmation, e.g. \"Yep, no worries! We'll get someone from the team to give you a buzz in about 30 mins.\" (use their time, or \"soon\" if they didn't give one).";
       }
@@ -287,13 +292,24 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
   const RETRY_NOTE =
     "\n\nIMPORTANT: your previous attempt produced no SMS text. Your reply MUST contain the SMS to send to the lead. Use any tools you still need, then write the message. Use every answer they've already given and don't repeat a question.";
 
+  const deadline = ctx.deadline ?? Date.now() + 45_000;
   for (let i = 0; i < 8; i++) {
+    // Out of time: send what we have rather than be cut off with no reply at all.
+    if (Date.now() > deadline - 3_000) {
+      console.warn("reply time budget used up", { done, said: said.length });
+      if (said.length) return await ensureRecorded(said[said.length - 1], ctx, transcript);
+      await ghl.addNote(ctx.contactId, "AI note: the reply took too long; a backup message was sent. Check this conversation.").catch(() => {});
+      return await fallbackMessage(ctx, transcript);
+    }
     if (retries >= 2 && !clean) {
       clean = true;
       messages.length = 0;
       messages.push(...base);
     }
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    let res: Response;
+    try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      signal: AbortSignal.timeout(Math.max(3_000, deadline - Date.now())),
       method: "POST",
       headers: {
         "x-api-key": process.env.ANTHROPIC_API_KEY!,
@@ -314,6 +330,10 @@ export async function generateReply(transcript: ChatMessage[], ctx: Ctx): Promis
         messages,
       }),
     });
+    } catch (e: any) {
+      if (e?.name === "TimeoutError" || e?.name === "AbortError") continue; // loop top sends the backup
+      throw e;
+    }
     if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const data: any = await res.json();
     const text = (data.content as Block[]).filter((b) => b.type === "text").map((b) => b.text).join("").trim();

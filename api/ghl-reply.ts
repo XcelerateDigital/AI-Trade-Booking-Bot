@@ -38,6 +38,7 @@ const counts = (t: { direction: string }[]) => ({
 });
 
 async function handle(req: VercelRequest, res: VercelResponse, body: any, contactId: string, payloadLocation?: string) {
+  const started = Date.now();
   try {
     const contact = await getContact(contactId);
     const locationId = contact.locationId || payloadLocation;
@@ -74,12 +75,13 @@ async function handle(req: VercelRequest, res: VercelResponse, body: any, contac
     }
 
     const profile = await loadProfile(locationId);
-    const ctx: Ctx = { contactId, locationId, firstName: contact.firstName, profile };
+    // Leave a safety margin under the 60s server limit to send the SMS and tag the contact.
+    const ctx: Ctx = { contactId, locationId, firstName: contact.firstName, profile, deadline: started + 48_000 };
     let reply = await generateReply(transcript, ctx);
     // Before sending, check nothing changed while the AI was thinking:
     // - someone else (a duplicate webhook or a person) already replied -> don't double up
     // - the lead sent another text -> write one reply that covers it too
-    for (let i = 0; i < 2 && reply; i++) {
+    for (let i = 0; i < 2 && reply && Date.now() < started + 30_000; i++) {
       const latest = await getTranscript(conversationId);
       const c = counts(latest);
       if (c.outbound > now.outbound) return res.status(200).json({ skipped: "already answered", outcome: ctx.outcome ?? "continuing" });
@@ -90,9 +92,8 @@ async function handle(req: VercelRequest, res: VercelResponse, body: any, contac
     if (reply) await sendSms(contactId, reply);
     console.log("ghl-reply", { business: profile.businessName, contactId, sent: !!reply, outcome: ctx.outcome ?? "continuing" });
 
-    if (ctx.outcome === "booked") await addTags(contactId, ["ai-booked"]);
-    if (ctx.outcome === "requested") await addTags(contactId, ["ai-booking-requested"]);
-    if (ctx.outcome === "callback") await addTags(contactId, ["ai-callback"]);
+    // (Outcome tags such as ai-booked / ai-callback are added the moment each action happens,
+    //  so a lead who asks for a booking AND a callback triggers both alerts.)
 
     return res.status(200).json({ ok: true, outcome: ctx.outcome ?? "continuing" });
   } catch (e: any) {

@@ -41,6 +41,7 @@ export function buildSystemPrompt(opts: { firstName?: string; canBook: boolean; 
    - If they ask for a CALLBACK (any wording: "call me", "can someone ring me", "callback in 30 mins"): ${callbackStep}
    - If they choose a BOOKING: ${bookingStep}
    - Once they've picked callback or booking, NEVER ask that choice again.
+   - If they ask for both (e.g. \"book Tuesday 10am, and can someone call me tomorrow at 11 about pricing\"), do both: book the visit AND record the callback, then confirm both in one message.
    - If they've already said which they want (e.g. "can someone call me", "can you come Thursday"), skip the question and go straight to that option.`;
   } else if (offerCallback) {
     step5 = `5. CALLBACK: this business only arranges callbacks, not bookings by text. Once you know the problem (and suburb, if you can get it), ask when suits for someone from the team to give them a call. Any time they ask for a call: ${callbackStep}`;
